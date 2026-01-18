@@ -1,10 +1,8 @@
 /**
  * SecureVaultX Configuration
  * ==========================
- * Update API_BASE_URL to point to your deployed backend
+ * API URL for the deployed backend on Render
  */
 
-// For local development: 'http://localhost:5000/api'
-// For production: 'https://your-backend-url.onrender.com/api'
-
-window.API_BASE_URL = 'https://securevault-api-zfy5.onrender.com';
+// Production backend URL (Render.com)
+window.API_BASE_URL = 'https://securevault-api-zfy5.onrender.com/api';
