@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: securevaultx-api
+    runtime: python
+    rootDir: web/backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: SECRET_KEY
+        generateValue: true
+    healthCheckPath: /api/health
+    autoDeploy: true
+    plan: free

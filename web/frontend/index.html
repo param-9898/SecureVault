@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description"
+        content="SecureVaultX - Post-Quantum Secure File Encryption Vault. Protect your files with military-grade encryption.">
+    <meta name="keywords" content="encryption, security, post-quantum, cryptography, vault, file encryption">
+    <title>SecureVaultX - Post-Quantum Secure Vault</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="icon"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔐</text></svg>">
+</head>
+
+<body>
+    <!-- Loading Screen -->
+    <div id="loadingScreen" class="loading-screen">
+        <div class="loading-content">
+            <div class="loading-icon">🔐</div>
+            <div class="loading-title">SecureVaultX</div>
+            <div class="loading-bar">
+                <div class="loading-bar-fill"></div>
+            </div>
+            <div class="loading-text">Initializing secure environment...</div>
+        </div>
+    </div>
+
+    <!-- Login Screen -->
+    <div id="loginScreen" class="screen login-screen">
+        <div class="login-container">
+            <div class="login-header">
+                <div class="logo-icon">🔐</div>
+                <h1 class="logo-title">SecureVaultX</h1>
+                <p class="logo-subtitle">Post-Quantum Secure File Encryption</p>
+            </div>
+
+            <div class="glowing-card login-card">
+                <div class="section-label">SIGN IN</div>
+
+                <div class="input-group">
+                    <input type="text" id="loginUsername" class="secure-input" placeholder="Username"
+                        autocomplete="username">
+                </div>
+
+                <div class="input-group">
+                    <input type="password" id="loginPassword" class="secure-input" placeholder="Password"
+                        autocomplete="current-password">
+                </div>
+
+                <div id="loginError" class="error-message"></div>
+
+                <button id="loginBtn" class="btn btn-primary btn-full">
+                    <span class="btn-text">Sign In</span>
+                    <span class="btn-loader"></span>
+                </button>
+            </div>
+
+            <div class="register-link">
+                <span>Don't have an account?</span>
+                <button id="showRegisterBtn" class="btn btn-secondary">Create Account</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Register Screen -->
+    <div id="registerScreen" class="screen register-screen hidden">
+        <div class="login-container">
+            <div class="login-header">
+                <div class="logo-icon">🔐</div>
+                <h1 class="logo-title">SecureVaultX</h1>
+                <p class="logo-subtitle">Create Your Secure Account</p>
+            </div>
+
+            <div class="glowing-card register-card" style="--glow-color: #00FF88;">
+                <div class="section-label" style="color: #00FF88;">CREATE ACCOUNT</div>
+
+                <div class="input-group">
+                    <input type="text" id="regUsername" class="secure-input" placeholder="Choose a username"
+                        autocomplete="username">
+                </div>
+
+                <div class="input-group">
+                    <input type="password" id="regPassword" class="secure-input"
+                        placeholder="Create password (min 12 characters)" autocomplete="new-password">
+                </div>
+
+                <div class="strength-bar-container">
+                    <span class="strength-label">Strength:</span>
+                    <div class="strength-bar">
+                        <div id="strengthBarFill" class="strength-bar-fill"></div>
+                    </div>
+                    <span id="strengthText" class="strength-text">Weak</span>
+                </div>
+
+                <div class="input-group">
+                    <input type="password" id="regConfirmPassword" class="secure-input" placeholder="Confirm password"
+                        autocomplete="new-password">
+                </div>
+
+                <div class="input-group">
+                    <label class="input-label">Role:</label>
+                    <select id="regRole" class="secure-select">
+                        <option value="USER">User</option>
+                        <option value="ADMIN">Administrator</option>
+                    </select>
+                </div>
+
+                <div id="registerError" class="error-message"></div>
+
+                <button id="registerBtn" class="btn btn-success btn-full">
+                    <span class="btn-text">Create Account</span>
+                    <span class="btn-loader"></span>
+                </button>
+            </div>
+
+            <div class="register-link">
+                <span>Already have an account?</span>
+                <button id="showLoginBtn" class="btn btn-secondary">Sign In</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dashboard Screen -->
+    <div id="dashboardScreen" class="screen dashboard-screen hidden">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-logo">🔐</div>
+                <div class="sidebar-title">SecureVaultX</div>
+            </div>
+
+            <nav class="sidebar-nav">
+                <button class="nav-item active" data-screen="dashboard">
+                    <span class="nav-icon">📊</span>
+                    <span class="nav-label">Dashboard</span>
+                </button>
+                <button class="nav-item" data-screen="encrypt">
+                    <span class="nav-icon">🔒</span>
+                    <span class="nav-label">Encrypt Files</span>
+                </button>
+                <button class="nav-item" data-screen="decrypt">
+                    <span class="nav-icon">🔓</span>
+                    <span class="nav-label">Decrypt Files</span>
+                </button>
+                <button class="nav-item" data-screen="device">
+                    <span class="nav-icon">🖥️</span>
+                    <span class="nav-label">Device Status</span>
+                </button>
+                <button class="nav-item" data-screen="audit">
+                    <span class="nav-icon">📜</span>
+                    <span class="nav-label">Audit Logs</span>
+                </button>
+            </nav>
+
+            <div class="sidebar-footer">
+                <button id="panicBtn" class="btn btn-panic">
+                    ⚠️ PANIC LOCK
+                </button>
+                <button id="logoutBtn" class="btn btn-secondary btn-full">
+                    🚪 Logout
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Header Bar -->
+            <header class="header-bar">
+                <h2 id="welcomeText" class="welcome-text">Welcome back</h2>
+                <div id="currentTime" class="current-time"></div>
+            </header>
+
+            <!-- Dashboard Home -->
+            <section id="dashboardHome" class="content-section">
+                <h1 class="page-heading">Dashboard Overview</h1>
+
+                <div class="stats-row">
+                    <div class="stat-card" style="--glow-color: #00D4FF;">
+                        <div class="stat-icon">📁</div>
+                        <div id="fileCount" class="stat-value">0</div>
+                        <div class="stat-title">ENCRYPTED FILES</div>
+                    </div>
+                    <div class="stat-card status-card" style="--glow-color: #00FF88;">
+                        <div class="stat-title">DEVICE STATUS</div>
+                        <div id="deviceStatus" class="status-value">SECURE</div>
+                    </div>
+                    <div class="stat-card" style="--glow-color: #FFD93D;">
+                        <div class="stat-icon">⏱️</div>
+                        <div id="sessionTime" class="stat-value">00:00</div>
+                        <div class="stat-title">SESSION TIME</div>
+                    </div>
+                </div>
+
+                <div class="section-label">QUICK ACTIONS</div>
+                <div class="actions-row">
+                    <div class="action-card" id="quickEncryptBtn" style="--glow-color: #00FF88;">
+                        <div class="action-icon">🔒</div>
+                        <div class="action-title">Encrypt Files</div>
+                    </div>
+                    <div class="action-card" id="quickDecryptBtn" style="--glow-color: #00D4FF;">
+                        <div class="action-icon">🔓</div>
+                        <div class="action-title">Decrypt Files</div>
+                    </div>
+                </div>
+
+                <div class="section-label">RECENT ACTIVITY</div>
+                <div class="glowing-card activity-card">
+                    <div id="activityFeed" class="activity-feed">
+                        <!-- Activity items will be inserted here -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- Encrypt Screen -->
+            <section id="encryptScreen" class="content-section hidden">
+                <h1 class="page-heading" style="color: #00FF88;">🔒 Encrypt Files</h1>
+                <p class="page-subtitle">Quantum-Safe Encryption • Argon2id Key Derivation • AES-256-GCM /
+                    ChaCha20-Poly1305</p>
+
+                <!-- Step 1: File Selection -->
+                <div class="step-card" style="--glow-color: #00FF88;">
+                    <div class="step-header">
+                        <div class="step-badge">1</div>
+                        <div class="step-title">SELECT FILE</div>
+                    </div>
+                    <div class="step-content">
+                        <div class="file-drop-zone" id="fileDropZone">
+                            <input type="file" id="fileInput" class="file-input" accept="*/*">
+                            <div class="file-drop-content">
+                                <div class="file-drop-icon">📂</div>
+                                <div class="file-drop-text">Click to choose file or drag & drop</div>
+                            </div>
+                        </div>
+                        <div id="fileInfo" class="file-info hidden">
+                            <div id="fileName" class="file-name"></div>
+                            <div class="file-details">
+                                <span id="fileSize" class="file-size"></span>
+                                <span id="fileType" class="file-type"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 2: Password -->
+                <div class="step-card" style="--glow-color: #00D4FF;">
+                    <div class="step-header">
+                        <div class="step-badge">2</div>
+                        <div class="step-title">SET PASSWORD</div>
+                    </div>
+                    <div class="step-content">
+                        <p class="step-hint">Create a strong password. You'll need this to decrypt the file.</p>
+                        <input type="password" id="encryptPassword" class="secure-input"
+                            placeholder="Enter password (min 8 characters)">
+                        <input type="password" id="encryptConfirmPassword" class="secure-input"
+                            placeholder="Confirm password">
+                    </div>
+                </div>
+
+                <!-- Step 3: Algorithm -->
+                <div class="step-card" style="--glow-color: #FFD93D;">
+                    <div class="step-header">
+                        <div class="step-badge">3</div>
+                        <div class="step-title">CHOOSE ALGORITHM</div>
+                    </div>
+                    <div class="step-content">
+                        <div class="radio-group">
+                            <label class="radio-option">
+                                <input type="radio" name="algorithm" value="aes" checked>
+                                <div class="radio-content">
+                                    <div class="radio-name">🔐 AES-256-GCM</div>
+                                    <div class="radio-desc">Industry standard + Argon2id KDF</div>
+                                </div>
+                            </label>
+                            <label class="radio-option">
+                                <input type="radio" name="algorithm" value="chacha">
+                                <div class="radio-content">
+                                    <div class="radio-name">⚡ ChaCha20-Poly1305</div>
+                                    <div class="radio-desc">Constant-time + Argon2id KDF</div>
+                                </div>
+                            </label>
+                            <label class="radio-option">
+                                <input type="radio" name="algorithm" value="hybrid">
+                                <div class="radio-content">
+                                    <div class="radio-name">🛡️ Quantum-Safe Hybrid</div>
+                                    <div class="radio-desc">ChaCha20 + AES + Argon2id (Post-Quantum Ready)</div>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Progress & Action -->
+                <div id="encryptProgress" class="progress-container hidden">
+                    <div class="progress-bar">
+                        <div id="encryptProgressFill" class="progress-fill"></div>
+                    </div>
+                    <div id="encryptStatus" class="progress-status"></div>
+                </div>
+
+                <button id="encryptBtn" class="btn btn-encrypt btn-full">
+                    🔐 ENCRYPT FILE
+                </button>
+            </section>
+
+            <!-- Decrypt Screen -->
+            <section id="decryptScreen" class="content-section hidden">
+                <div class="decrypt-header">
+                    <h1 class="page-heading" style="color: #00D4FF;">🔓 Decrypt Files</h1>
+                    <button id="refreshFilesBtn" class="btn btn-secondary">🔄 Refresh</button>
+                </div>
+                <p class="page-subtitle">Select a file, enter password to preview, then save the decrypted file.</p>
+
+                <div id="fileStats" class="file-stats-bar">
+                    <span id="fileCountLabel">📁 0 encrypted files</span>
+                </div>
+
+                <div id="fileList" class="file-list">
+                    <!-- Files will be loaded here -->
+                    <div class="empty-state">
+                        <div class="empty-icon">📂</div>
+                        <div class="empty-text">No encrypted files found. Encrypt some files first!</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Device Status Screen -->
+            <section id="deviceScreen" class="content-section hidden">
+                <h1 class="page-heading" style="color: #00D4FF;">🖥️ Device Security Status</h1>
+                <p class="page-subtitle">Real-time security monitoring and system integrity verification</p>
+
+                <div class="stats-row">
+                    <div class="stat-card" style="--glow-color: #00D4FF;">
+                        <div class="stat-icon">💻</div>
+                        <div id="osName" class="stat-value">Loading...</div>
+                        <div class="stat-title">OPERATING SYSTEM</div>
+                    </div>
+                    <div class="stat-card" style="--glow-color: #FFD93D;">
+                        <div class="stat-icon">⚡</div>
+                        <div id="cpuUsage" class="stat-value">--</div>
+                        <div class="stat-title">CPU USAGE</div>
+                    </div>
+                    <div class="stat-card" style="--glow-color: #FF6B6B;">
+                        <div class="stat-icon">🧠</div>
+                        <div id="memUsage" class="stat-value">--</div>
+                        <div class="stat-title">MEMORY USAGE</div>
+                    </div>
+                </div>
+
+                <div class="section-label" style="color: #00FF88;">SECURITY VERIFICATION</div>
+
+                <div id="securityChecks" class="security-checks">
+                    <!-- Security check cards will be loaded here -->
+                </div>
+
+                <div id="lastVerified" class="last-verified">Last verified: --:--:--</div>
+            </section>
+
+            <!-- Audit Logs Screen -->
+            <section id="auditScreen" class="content-section hidden">
+                <div class="audit-header">
+                    <h1 class="page-heading" style="color: #FFD93D;">📜 Security Audit Logs</h1>
+                    <div class="audit-filters">
+                        <button class="btn btn-secondary filter-btn active" data-filter="all">All</button>
+                        <button class="btn btn-secondary filter-btn" data-filter="warning">⚠️</button>
+                        <button class="btn btn-secondary filter-btn" data-filter="error">❌</button>
+                    </div>
+                </div>
+
+                <div class="log-stats">
+                    <div class="stat-pill" style="--color: #00D4FF;">
+                        <span id="totalLogs" class="pill-value">0</span>
+                        <span class="pill-label">Total</span>
+                    </div>
+                    <div class="stat-pill" style="--color: #00D4FF;">
+                        <span id="infoLogs" class="pill-value">0</span>
+                        <span class="pill-label">Info</span>
+                    </div>
+                    <div class="stat-pill" style="--color: #00FF88;">
+                        <span id="successLogs" class="pill-value">0</span>
+                        <span class="pill-label">Success</span>
+                    </div>
+                    <div class="stat-pill" style="--color: #FFD93D;">
+                        <span id="warningLogs" class="pill-value">0</span>
+                        <span class="pill-label">Warnings</span>
+                    </div>
+                    <div class="stat-pill" style="--color: #FF6B6B;">
+                        <span id="errorLogs" class="pill-value">0</span>
+                        <span class="pill-label">Errors</span>
+                    </div>
+                </div>
+
+                <div id="logEntries" class="log-entries">
+                    <!-- Log entries will be loaded here -->
+                </div>
+
+                <div class="live-indicator">
+                    <span id="liveDot" class="live-dot">●</span>
+                    <span class="live-text">Live Updates Active</span>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Decrypt Dialog Modal -->
+    <div id="decryptModal" class="modal hidden">
+        <div class="modal-overlay"></div>
+        <div class="modal-content decrypt-dialog">
+            <h2 id="decryptModalTitle" class="modal-title">🔓 Decrypt File</h2>
+
+            <div class="modal-body">
+                <div class="modal-columns">
+                    <!-- Left Column: Options -->
+                    <div class="modal-left">
+                        <div class="file-info-box">
+                            <div id="modalFileSize" class="info-line"></div>
+                            <div id="modalFileAlgo" class="info-line"></div>
+                        </div>
+
+                        <div class="section-label" style="color: #FFD93D;">DECRYPTION PASSWORD</div>
+                        <input type="password" id="decryptPassword" class="secure-input" placeholder="Enter password">
+
+                        <button id="previewBtn" class="btn btn-secondary btn-full">👁️ Preview File</button>
+
+                        <div id="decryptError" class="error-message"></div>
+
+                        <div class="modal-actions">
+                            <button id="cancelDecryptBtn" class="btn btn-secondary">Cancel</button>
+                            <button id="saveDecryptedBtn" class="btn btn-primary" disabled>💾 Save Decrypted
+                                File</button>
+                        </div>
+                    </div>
+
+                    <!-- Right Column: Preview -->
+                    <div class="modal-right">
+                        <div class="preview-header">📄 FILE PREVIEW</div>
+                        <div class="preview-tabs">
+                            <button class="preview-tab active" data-tab="text">📝 Text</button>
+                            <button class="preview-tab" data-tab="hex">🔢 Hex</button>
+                        </div>
+                        <div id="previewContent" class="preview-content">
+                            <div class="preview-placeholder">Enter password and click Preview to see file content</div>
+                        </div>
+                        <div id="previewInfo" class="preview-info"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Success/Error Overlays -->
+    <div id="successOverlay" class="overlay success-overlay hidden">
+        <div class="overlay-content">
+            <div class="overlay-icon">✅</div>
+            <div id="successMessage" class="overlay-message">Success!</div>
+        </div>
+    </div>
+
+    <div id="errorOverlay" class="overlay error-overlay hidden">
+        <div class="overlay-content">
+            <div class="overlay-icon">❌</div>
+            <div id="errorMessage" class="overlay-message">Error!</div>
+            <button id="closeErrorBtn" class="btn btn-secondary">Close</button>
+        </div>
+    </div>
+
+    <script src="js/config.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/app.js"></script>
+</body>
+
+</html>
