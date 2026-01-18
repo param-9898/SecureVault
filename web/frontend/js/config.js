@@ -7,4 +7,4 @@
 // For local development: 'http://localhost:5000/api'
 // For production: 'https://your-backend-url.onrender.com/api'
 
-window.API_BASE_URL = 'https://securevaultx-api.onrender.com/api';
+window.API_BASE_URL = 'https://securevault-api-zfy5.onrender.com';
