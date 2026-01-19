@@ -10,6 +10,8 @@ services:
         value: "3.11"
       - key: SECRET_KEY
         generateValue: true
+      - key: DATABASE_URL
+        sync: false  # You must set this manually in Render dashboard
     healthCheckPath: /api/health
     autoDeploy: true
     plan: free
