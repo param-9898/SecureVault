@@ -5,4 +5,4 @@
  */
 
 // Production backend URL (Render.com with Supabase PostgreSQL)
-window.API_BASE_URL = 'https://securevault-dldd.onrender.com/api';
+window.API_BASE_URL = 'https://securevault-74lr.onrender.com/api';
