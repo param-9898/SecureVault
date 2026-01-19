@@ -2,7 +2,7 @@
 SecureVaultX Web API
 ====================
 Flask backend for the web-based SecureVault application.
-Uses SQLite for persistent data storage.
+Uses PostgreSQL (Supabase) for persistent data storage.
 """
 
 import os
@@ -11,16 +11,23 @@ import uuid
 import hashlib
 import secrets
 import struct
-import sqlite3
-import json
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from functools import wraps
-from contextlib import contextmanager
+from urllib.parse import urlparse
 
 from flask import Flask, request, jsonify, send_file, g
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
+
+# Try to import psycopg2 for PostgreSQL, fallback to sqlite3
+try:
+    import psycopg2
+    import psycopg2.extras
+    HAS_POSTGRES = True
+except ImportError:
+    HAS_POSTGRES = False
+    import sqlite3
 
 # Add parent path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -31,7 +38,7 @@ CORS(app, supports_credentials=True)
 # Configuration
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 app.config['UPLOAD_FOLDER'] = os.environ.get('UPLOAD_FOLDER', '/tmp/securevault_uploads')
-app.config['DATABASE'] = os.environ.get('DATABASE_PATH', '/tmp/securevault.db')
+app.config['DATABASE_URL'] = os.environ.get('DATABASE_URL', '')
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max
 
 # Ensure folders exist
@@ -41,18 +48,25 @@ Path(app.config['UPLOAD_FOLDER']).mkdir(parents=True, exist_ok=True)
 MAGIC_BYTES = b"SVEX"
 VERSION = 1
 
+# Determine database type
+USE_POSTGRES = HAS_POSTGRES and app.config['DATABASE_URL']
+
 # ============================================================
-# DATABASE
+# DATABASE - PostgreSQL with SQLite fallback
 # ============================================================
 
 def get_db():
     """Get database connection for current request."""
     if 'db' not in g:
-        g.db = sqlite3.connect(
-            app.config['DATABASE'],
-            detect_types=sqlite3.PARSE_DECLTYPES
-        )
-        g.db.row_factory = sqlite3.Row
+        if USE_POSTGRES:
+            # PostgreSQL (Supabase)
+            g.db = psycopg2.connect(app.config['DATABASE_URL'])
+            g.db.autocommit = False
+        else:
+            # SQLite fallback for local development
+            db_path = os.environ.get('DATABASE_PATH', '/tmp/securevault.db')
+            g.db = sqlite3.connect(db_path, detect_types=sqlite3.PARSE_DECLTYPES)
+            g.db.row_factory = sqlite3.Row
     return g.db
 
 
@@ -67,47 +81,121 @@ def close_db(error):
 def init_db():
     """Initialize database tables."""
     db = get_db()
-    db.executescript('''
-        CREATE TABLE IF NOT EXISTS users (
-            id TEXT PRIMARY KEY,
-            username TEXT UNIQUE NOT NULL,
-            salt BLOB NOT NULL,
-            password_hash BLOB NOT NULL,
-            role TEXT DEFAULT 'USER',
-            created_at TEXT NOT NULL
-        );
-        
-        CREATE TABLE IF NOT EXISTS sessions (
-            token TEXT PRIMARY KEY,
-            user_id TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            expires_at TEXT NOT NULL,
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        );
-        
-        CREATE TABLE IF NOT EXISTS encrypted_files (
-            id TEXT PRIMARY KEY,
-            user_id TEXT NOT NULL,
-            original_path TEXT NOT NULL,
-            encrypted_path TEXT NOT NULL,
-            filename TEXT NOT NULL,
-            file_size INTEGER NOT NULL,
-            algorithm TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        );
-        
-        CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
-        CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
-        CREATE INDEX IF NOT EXISTS idx_files_user_id ON encrypted_files(user_id);
-    ''')
-    db.commit()
+    
+    if USE_POSTGRES:
+        # PostgreSQL syntax
+        cur = db.cursor()
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id TEXT PRIMARY KEY,
+                username TEXT UNIQUE NOT NULL,
+                salt BYTEA NOT NULL,
+                password_hash BYTEA NOT NULL,
+                role TEXT DEFAULT 'USER',
+                created_at TEXT NOT NULL
+            )
+        ''')
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS sessions (
+                token TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL
+            )
+        ''')
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS encrypted_files (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                original_path TEXT NOT NULL,
+                encrypted_path TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                file_size INTEGER NOT NULL,
+                algorithm TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        ''')
+        db.commit()
+        cur.close()
+    else:
+        # SQLite syntax
+        db.executescript('''
+            CREATE TABLE IF NOT EXISTS users (
+                id TEXT PRIMARY KEY,
+                username TEXT UNIQUE NOT NULL,
+                salt BLOB NOT NULL,
+                password_hash BLOB NOT NULL,
+                role TEXT DEFAULT 'USER',
+                created_at TEXT NOT NULL
+            );
+            
+            CREATE TABLE IF NOT EXISTS sessions (
+                token TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL
+            );
+            
+            CREATE TABLE IF NOT EXISTS encrypted_files (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                original_path TEXT NOT NULL,
+                encrypted_path TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                file_size INTEGER NOT NULL,
+                algorithm TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+        ''')
+        db.commit()
+
+
+def db_execute(query, params=None):
+    """Execute query with proper parameter syntax for both databases."""
+    db = get_db()
+    
+    if USE_POSTGRES:
+        # Convert ? to %s for PostgreSQL
+        query = query.replace('?', '%s')
+        cur = db.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(query, params or ())
+        return cur
+    else:
+        return db.execute(query, params or ())
+
+
+def db_commit():
+    """Commit transaction."""
+    get_db().commit()
+
+
+def db_fetchone(query, params=None):
+    """Fetch one row."""
+    cur = db_execute(query, params)
+    row = cur.fetchone()
+    if USE_POSTGRES:
+        cur.close()
+    return row
+
+
+def db_fetchall(query, params=None):
+    """Fetch all rows."""
+    cur = db_execute(query, params)
+    rows = cur.fetchall()
+    if USE_POSTGRES:
+        cur.close()
+    return rows
 
 
 # Initialize database on first request
+_db_initialized = False
+
 @app.before_request
 def before_request():
-    init_db()
+    global _db_initialized
+    if not _db_initialized:
+        init_db()
+        _db_initialized = True
 
 
 # ============================================================
@@ -137,6 +225,12 @@ def hash_password(password: str) -> tuple:
 
 def verify_password(password: str, salt: bytes, stored_hash: bytes) -> bool:
     """Verify password against stored hash."""
+    # Handle memoryview from PostgreSQL
+    if isinstance(salt, memoryview):
+        salt = bytes(salt)
+    if isinstance(stored_hash, memoryview):
+        stored_hash = bytes(stored_hash)
+    
     computed_hash = derive_key_pbkdf2(password, salt, 32)
     return secrets.compare_digest(computed_hash, stored_hash)
 
@@ -147,36 +241,41 @@ def create_session(user_id: str) -> str:
     now = datetime.now(timezone.utc)
     expires = now + timedelta(hours=24)
     
-    db = get_db()
-    db.execute(
+    db_execute(
         'INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)',
         (token, user_id, now.isoformat(), expires.isoformat())
     )
-    db.commit()
+    db_commit()
     return token
 
 
 def validate_session(token: str) -> dict:
     """Validate session token from database."""
-    db = get_db()
-    session = db.execute(
-        'SELECT * FROM sessions WHERE token = ?', (token,)
-    ).fetchone()
+    session = db_fetchone('SELECT * FROM sessions WHERE token = ?', (token,))
     
     if not session:
         return None
     
-    expires_at = datetime.fromisoformat(session['expires_at'])
+    # Handle dict (PostgreSQL) vs Row (SQLite)
+    if isinstance(session, dict):
+        expires_at = datetime.fromisoformat(session['expires_at'])
+        user_id = session['user_id']
+        created_at = session['created_at']
+    else:
+        expires_at = datetime.fromisoformat(session['expires_at'])
+        user_id = session['user_id']
+        created_at = session['created_at']
+    
     if datetime.now(timezone.utc) > expires_at:
         # Delete expired session
-        db.execute('DELETE FROM sessions WHERE token = ?', (token,))
-        db.commit()
+        db_execute('DELETE FROM sessions WHERE token = ?', (token,))
+        db_commit()
         return None
     
     return {
-        'user_id': session['user_id'],
-        'created_at': session['created_at'],
-        'expires_at': session['expires_at']
+        'user_id': user_id,
+        'created_at': created_at,
+        'expires_at': expires_at.isoformat()
     }
 
 
@@ -279,10 +378,11 @@ def decrypt_hybrid(ciphertext: bytes, metadata: bytes, key: bytes) -> bytes:
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint."""
+    db_type = 'postgresql' if USE_POSTGRES else 'sqlite'
     return jsonify({
         'status': 'healthy',
         'version': '1.0.0',
-        'database': 'sqlite',
+        'database': db_type,
         'timestamp': datetime.now(timezone.utc).isoformat()
     })
 
@@ -321,12 +421,8 @@ def register():
     if strength < 60:
         return jsonify({'error': 'Password is too weak'}), 400
     
-    db = get_db()
-    
     # Check if username exists
-    existing = db.execute(
-        'SELECT id FROM users WHERE username = ?', (username,)
-    ).fetchone()
+    existing = db_fetchone('SELECT id FROM users WHERE username = ?', (username,))
     if existing:
         return jsonify({'error': 'Username already exists'}), 400
     
@@ -334,11 +430,11 @@ def register():
     user_id = str(uuid.uuid4())
     salt, password_hash = hash_password(password)
     
-    db.execute(
+    db_execute(
         'INSERT INTO users (id, username, salt, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?)',
         (user_id, username, salt, password_hash, role, datetime.now(timezone.utc).isoformat())
     )
-    db.commit()
+    db_commit()
     
     return jsonify({
         'success': True,
@@ -357,25 +453,34 @@ def login():
     if not username or not password:
         return jsonify({'error': 'Username and password required'}), 400
     
-    db = get_db()
-    user = db.execute(
-        'SELECT * FROM users WHERE username = ?', (username,)
-    ).fetchone()
+    user = db_fetchone('SELECT * FROM users WHERE username = ?', (username,))
     
     if not user:
         return jsonify({'error': 'Invalid username or password'}), 401
     
-    if not verify_password(password, user['salt'], user['password_hash']):
+    # Handle dict (PostgreSQL) vs Row (SQLite)
+    if isinstance(user, dict):
+        user_id = user['id']
+        salt = user['salt']
+        pw_hash = user['password_hash']
+        user_role = user['role']
+    else:
+        user_id = user['id']
+        salt = user['salt']
+        pw_hash = user['password_hash']
+        user_role = user['role']
+    
+    if not verify_password(password, salt, pw_hash):
         return jsonify({'error': 'Invalid username or password'}), 401
     
-    token = create_session(user['id'])
+    token = create_session(user_id)
     
     return jsonify({
         'success': True,
         'token': token,
-        'user_id': user['id'],
+        'user_id': user_id,
         'username': username,
-        'role': user['role']
+        'role': user_role
     })
 
 
@@ -384,9 +489,8 @@ def login():
 def logout():
     """Logout and invalidate session."""
     token = request.headers.get('Authorization', '').replace('Bearer ', '')
-    db = get_db()
-    db.execute('DELETE FROM sessions WHERE token = ?', (token,))
-    db.commit()
+    db_execute('DELETE FROM sessions WHERE token = ?', (token,))
+    db_commit()
     return jsonify({'success': True})
 
 
@@ -395,13 +499,14 @@ def logout():
 def validate_token():
     """Validate current session token."""
     user_id = request.user_id
-    db = get_db()
-    user = db.execute('SELECT username FROM users WHERE id = ?', (user_id,)).fetchone()
+    user = db_fetchone('SELECT username FROM users WHERE id = ?', (user_id,))
+    
+    username = user['username'] if user else 'Unknown'
     
     return jsonify({
         'valid': True,
         'user_id': user_id,
-        'username': user['username'] if user else 'Unknown'
+        'username': username
     })
 
 
@@ -460,16 +565,15 @@ def encrypt_file():
         encrypted_path.write_bytes(output_data)
         
         # Store file record in database
-        db = get_db()
         algo_name = {'aes': 'AES-256-GCM', 'chacha': 'ChaCha20-Poly1305', 'hybrid': 'Hybrid'}[algorithm]
-        db.execute(
+        db_execute(
             '''INSERT INTO encrypted_files 
                (id, user_id, original_path, encrypted_path, filename, file_size, algorithm, created_at) 
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
             (file_id, request.user_id, filename, str(encrypted_path), encrypted_filename, 
              original_size, algo_name, datetime.now(timezone.utc).isoformat())
         )
-        db.commit()
+        db_commit()
         
         return jsonify({
             'success': True,
@@ -492,20 +596,19 @@ def decrypt_file():
     file_id = data.get('file_id')
     password = data.get('password', '')
     
-    db = get_db()
-    file_record = db.execute(
-        'SELECT * FROM encrypted_files WHERE id = ?', (file_id,)
-    ).fetchone()
+    file_record = db_fetchone('SELECT * FROM encrypted_files WHERE id = ?', (file_id,))
     
     if not file_record:
         return jsonify({'error': 'File not found'}), 404
     
-    if file_record['user_id'] != request.user_id:
+    record_user_id = file_record['user_id'] if isinstance(file_record, dict) else file_record['user_id']
+    if record_user_id != request.user_id:
         return jsonify({'error': 'Unauthorized'}), 403
     
     try:
         # Read encrypted file
-        encrypted_path = Path(file_record['encrypted_path'])
+        encrypted_path_str = file_record['encrypted_path'] if isinstance(file_record, dict) else file_record['encrypted_path']
+        encrypted_path = Path(encrypted_path_str)
         if not encrypted_path.exists():
             return jsonify({'error': 'Encrypted file not found on disk'}), 404
         
@@ -539,7 +642,7 @@ def decrypt_file():
             return jsonify({'error': 'Unknown algorithm'}), 400
         
         # Determine file type for preview
-        original_name = file_record['original_path']
+        original_name = file_record['original_path'] if isinstance(file_record, dict) else file_record['original_path']
         ext = Path(original_name).suffix.lower()
         
         # For text files, return content
@@ -601,12 +704,11 @@ def download_decrypted(decrypted_id):
 @require_auth
 def list_files():
     """List all encrypted files for the current user."""
-    db = get_db()
-    files = db.execute(
+    files = db_fetchall(
         '''SELECT id, original_path, filename, file_size, algorithm, created_at 
            FROM encrypted_files WHERE user_id = ? ORDER BY created_at DESC''',
         (request.user_id,)
-    ).fetchall()
+    )
     
     file_list = [{
         'id': f['id'],
@@ -628,26 +730,25 @@ def list_files():
 @require_auth
 def delete_file(file_id):
     """Delete an encrypted file."""
-    db = get_db()
-    file_record = db.execute(
-        'SELECT * FROM encrypted_files WHERE id = ?', (file_id,)
-    ).fetchone()
+    file_record = db_fetchone('SELECT * FROM encrypted_files WHERE id = ?', (file_id,))
     
     if not file_record:
         return jsonify({'error': 'File not found'}), 404
     
-    if file_record['user_id'] != request.user_id:
+    record_user_id = file_record['user_id'] if isinstance(file_record, dict) else file_record['user_id']
+    if record_user_id != request.user_id:
         return jsonify({'error': 'Unauthorized'}), 403
     
     # Delete physical file
     try:
-        Path(file_record['encrypted_path']).unlink(missing_ok=True)
+        encrypted_path = file_record['encrypted_path'] if isinstance(file_record, dict) else file_record['encrypted_path']
+        Path(encrypted_path).unlink(missing_ok=True)
     except:
         pass
     
     # Remove database record
-    db.execute('DELETE FROM encrypted_files WHERE id = ?', (file_id,))
-    db.commit()
+    db_execute('DELETE FROM encrypted_files WHERE id = ?', (file_id,))
+    db_commit()
     
     return jsonify({'success': True})
 
@@ -656,11 +757,10 @@ def delete_file(file_id):
 @require_auth
 def get_stats():
     """Get dashboard statistics."""
-    db = get_db()
-    files = db.execute(
+    files = db_fetchall(
         'SELECT file_size, algorithm FROM encrypted_files WHERE user_id = ?',
         (request.user_id,)
-    ).fetchall()
+    )
     
     total_size = sum(f['file_size'] for f in files)
     algo_counts = {}
@@ -682,6 +782,8 @@ def system_status():
     """Get system security status."""
     import platform
     
+    db_type = 'POSTGRESQL (Supabase)' if USE_POSTGRES else 'SQLITE (Local)'
+    
     return jsonify({
         'success': True,
         'os': platform.system(),
@@ -691,7 +793,7 @@ def system_status():
             'encryption_engine': {'status': 'KYBER-1024 READY', 'ok': True},
             'secure_memory': {'status': 'PROTECTED', 'ok': True},
             'network_isolation': {'status': 'LOCAL ONLY', 'ok': True},
-            'database': {'status': 'SQLITE CONNECTED', 'ok': True},
+            'database': {'status': db_type, 'ok': True},
         },
         'timestamp': datetime.now(timezone.utc).isoformat()
     })
