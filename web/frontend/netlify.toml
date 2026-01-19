@@ -1,4 +1,8 @@
+# Netlify Configuration for SecureVaultX Frontend
+
 [build]
+  # No build command needed - static HTML/CSS/JS
+  command = ""
   publish = "."
 
 [[headers]]
@@ -10,3 +14,9 @@
     Access-Control-Allow-Origin = "*"
     Access-Control-Allow-Methods = "GET, POST, PUT, DELETE, OPTIONS"
     Access-Control-Allow-Headers = "Content-Type, Authorization"
+
+# Redirect all routes to index.html for SPA behavior
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
