@@ -2,7 +2,7 @@
 SecureVaultX Web API
 ====================
 Flask backend for the web-based SecureVault application.
-Maintains all original encryption and authentication logic.
+Uses SQLite for persistent data storage.
 """
 
 import os
@@ -11,11 +11,14 @@ import uuid
 import hashlib
 import secrets
 import struct
+import sqlite3
+import json
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from functools import wraps
+from contextlib import contextmanager
 
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, g
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
@@ -28,18 +31,84 @@ CORS(app, supports_credentials=True)
 # Configuration
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 app.config['UPLOAD_FOLDER'] = os.environ.get('UPLOAD_FOLDER', '/tmp/securevault_uploads')
+app.config['DATABASE'] = os.environ.get('DATABASE_PATH', '/tmp/securevault.db')
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max
 
-# Ensure upload folder exists
+# Ensure folders exist
 Path(app.config['UPLOAD_FOLDER']).mkdir(parents=True, exist_ok=True)
-
-# In-memory session store (use Redis in production)
-sessions = {}
-users = {}  # In-memory user store (use database in production)
 
 # Encryption format constants
 MAGIC_BYTES = b"SVEX"
 VERSION = 1
+
+# ============================================================
+# DATABASE
+# ============================================================
+
+def get_db():
+    """Get database connection for current request."""
+    if 'db' not in g:
+        g.db = sqlite3.connect(
+            app.config['DATABASE'],
+            detect_types=sqlite3.PARSE_DECLTYPES
+        )
+        g.db.row_factory = sqlite3.Row
+    return g.db
+
+
+@app.teardown_appcontext
+def close_db(error):
+    """Close database connection at end of request."""
+    db = g.pop('db', None)
+    if db is not None:
+        db.close()
+
+
+def init_db():
+    """Initialize database tables."""
+    db = get_db()
+    db.executescript('''
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            username TEXT UNIQUE NOT NULL,
+            salt BLOB NOT NULL,
+            password_hash BLOB NOT NULL,
+            role TEXT DEFAULT 'USER',
+            created_at TEXT NOT NULL
+        );
+        
+        CREATE TABLE IF NOT EXISTS sessions (
+            token TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        );
+        
+        CREATE TABLE IF NOT EXISTS encrypted_files (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            original_path TEXT NOT NULL,
+            encrypted_path TEXT NOT NULL,
+            filename TEXT NOT NULL,
+            file_size INTEGER NOT NULL,
+            algorithm TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        );
+        
+        CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+        CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
+        CREATE INDEX IF NOT EXISTS idx_files_user_id ON encrypted_files(user_id);
+    ''')
+    db.commit()
+
+
+# Initialize database on first request
+@app.before_request
+def before_request():
+    init_db()
+
 
 # ============================================================
 # AUTHENTICATION
@@ -73,25 +142,42 @@ def verify_password(password: str, salt: bytes, stored_hash: bytes) -> bool:
 
 
 def create_session(user_id: str) -> str:
-    """Create a new session token."""
+    """Create a new session token in database."""
     token = secrets.token_hex(32)
-    sessions[token] = {
-        'user_id': user_id,
-        'created_at': datetime.now(timezone.utc),
-        'expires_at': datetime.now(timezone.utc) + timedelta(hours=24)
-    }
+    now = datetime.now(timezone.utc)
+    expires = now + timedelta(hours=24)
+    
+    db = get_db()
+    db.execute(
+        'INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)',
+        (token, user_id, now.isoformat(), expires.isoformat())
+    )
+    db.commit()
     return token
 
 
 def validate_session(token: str) -> dict:
-    """Validate session token and return session data."""
-    session = sessions.get(token)
+    """Validate session token from database."""
+    db = get_db()
+    session = db.execute(
+        'SELECT * FROM sessions WHERE token = ?', (token,)
+    ).fetchone()
+    
     if not session:
         return None
-    if datetime.now(timezone.utc) > session['expires_at']:
-        del sessions[token]
+    
+    expires_at = datetime.fromisoformat(session['expires_at'])
+    if datetime.now(timezone.utc) > expires_at:
+        # Delete expired session
+        db.execute('DELETE FROM sessions WHERE token = ?', (token,))
+        db.commit()
         return None
-    return session
+    
+    return {
+        'user_id': session['user_id'],
+        'created_at': session['created_at'],
+        'expires_at': session['expires_at']
+    }
 
 
 def require_auth(f):
@@ -186,10 +272,6 @@ def decrypt_hybrid(ciphertext: bytes, metadata: bytes, key: bytes) -> bytes:
     return decrypt_chacha20(chacha_ct, chacha_nonce, key1)
 
 
-# In-memory file storage (use database in production)
-encrypted_files = {}
-
-
 # ============================================================
 # API ROUTES
 # ============================================================
@@ -200,8 +282,24 @@ def health_check():
     return jsonify({
         'status': 'healthy',
         'version': '1.0.0',
+        'database': 'sqlite',
         'timestamp': datetime.now(timezone.utc).isoformat()
     })
+
+
+def calculate_password_strength(password: str) -> int:
+    """Calculate password strength score."""
+    if not password:
+        return 0
+    score = 0
+    if len(password) >= 8: score += 20
+    if len(password) >= 12: score += 15
+    if len(password) >= 16: score += 10
+    if any(c.islower() for c in password): score += 10
+    if any(c.isupper() for c in password): score += 15
+    if any(c.isdigit() for c in password): score += 15
+    if any(c in "!@#$%^&*()_+-=[]{}|;:,.<>?" for c in password): score += 15
+    return min(100, score)
 
 
 @app.route('/api/auth/register', methods=['POST'])
@@ -217,26 +315,30 @@ def register():
         return jsonify({'error': 'Username must be at least 3 characters'}), 400
     if not password or len(password) < 12:
         return jsonify({'error': 'Password must be at least 12 characters'}), 400
-    if username in users:
-        return jsonify({'error': 'Username already exists'}), 400
     
     # Calculate password strength
     strength = calculate_password_strength(password)
     if strength < 60:
         return jsonify({'error': 'Password is too weak'}), 400
     
+    db = get_db()
+    
+    # Check if username exists
+    existing = db.execute(
+        'SELECT id FROM users WHERE username = ?', (username,)
+    ).fetchone()
+    if existing:
+        return jsonify({'error': 'Username already exists'}), 400
+    
     # Create user
     user_id = str(uuid.uuid4())
     salt, password_hash = hash_password(password)
     
-    users[username] = {
-        'id': user_id,
-        'username': username,
-        'salt': salt,
-        'password_hash': password_hash,
-        'role': role,
-        'created_at': datetime.now(timezone.utc).isoformat()
-    }
+    db.execute(
+        'INSERT INTO users (id, username, salt, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        (user_id, username, salt, password_hash, role, datetime.now(timezone.utc).isoformat())
+    )
+    db.commit()
     
     return jsonify({
         'success': True,
@@ -255,7 +357,11 @@ def login():
     if not username or not password:
         return jsonify({'error': 'Username and password required'}), 400
     
-    user = users.get(username)
+    db = get_db()
+    user = db.execute(
+        'SELECT * FROM users WHERE username = ?', (username,)
+    ).fetchone()
+    
     if not user:
         return jsonify({'error': 'Invalid username or password'}), 401
     
@@ -278,8 +384,9 @@ def login():
 def logout():
     """Logout and invalidate session."""
     token = request.headers.get('Authorization', '').replace('Bearer ', '')
-    if token in sessions:
-        del sessions[token]
+    db = get_db()
+    db.execute('DELETE FROM sessions WHERE token = ?', (token,))
+    db.commit()
     return jsonify({'success': True})
 
 
@@ -288,33 +395,14 @@ def logout():
 def validate_token():
     """Validate current session token."""
     user_id = request.user_id
-    # Find user by ID
-    user_data = None
-    for u in users.values():
-        if u['id'] == user_id:
-            user_data = u
-            break
+    db = get_db()
+    user = db.execute('SELECT username FROM users WHERE id = ?', (user_id,)).fetchone()
     
     return jsonify({
         'valid': True,
         'user_id': user_id,
-        'username': user_data['username'] if user_data else 'Unknown'
+        'username': user['username'] if user else 'Unknown'
     })
-
-
-def calculate_password_strength(password: str) -> int:
-    """Calculate password strength score."""
-    if not password:
-        return 0
-    score = 0
-    if len(password) >= 8: score += 20
-    if len(password) >= 12: score += 15
-    if len(password) >= 16: score += 10
-    if any(c.islower() for c in password): score += 10
-    if any(c.isupper() for c in password): score += 15
-    if any(c.isdigit() for c in password): score += 15
-    if any(c in "!@#$%^&*()_+-=[]{}|;:,.<>?" for c in password): score += 15
-    return min(100, score)
 
 
 @app.route('/api/encrypt', methods=['POST'])
@@ -371,17 +459,17 @@ def encrypt_file():
         encrypted_path = Path(app.config['UPLOAD_FOLDER']) / file_id
         encrypted_path.write_bytes(output_data)
         
-        # Store file record
-        encrypted_files[file_id] = {
-            'id': file_id,
-            'user_id': request.user_id,
-            'original_path': filename,
-            'encrypted_path': str(encrypted_path),
-            'filename': encrypted_filename,
-            'file_size': original_size,
-            'algorithm': {'aes': 'AES-256-GCM', 'chacha': 'ChaCha20-Poly1305', 'hybrid': 'Hybrid'}[algorithm],
-            'created_at': datetime.now(timezone.utc).isoformat()
-        }
+        # Store file record in database
+        db = get_db()
+        algo_name = {'aes': 'AES-256-GCM', 'chacha': 'ChaCha20-Poly1305', 'hybrid': 'Hybrid'}[algorithm]
+        db.execute(
+            '''INSERT INTO encrypted_files 
+               (id, user_id, original_path, encrypted_path, filename, file_size, algorithm, created_at) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+            (file_id, request.user_id, filename, str(encrypted_path), encrypted_filename, 
+             original_size, algo_name, datetime.now(timezone.utc).isoformat())
+        )
+        db.commit()
         
         return jsonify({
             'success': True,
@@ -389,7 +477,7 @@ def encrypt_file():
             'filename': encrypted_filename,
             'original_size': original_size,
             'encrypted_size': len(output_data),
-            'algorithm': encrypted_files[file_id]['algorithm']
+            'algorithm': algo_name
         })
         
     except Exception as e:
@@ -404,10 +492,14 @@ def decrypt_file():
     file_id = data.get('file_id')
     password = data.get('password', '')
     
-    if not file_id or file_id not in encrypted_files:
+    db = get_db()
+    file_record = db.execute(
+        'SELECT * FROM encrypted_files WHERE id = ?', (file_id,)
+    ).fetchone()
+    
+    if not file_record:
         return jsonify({'error': 'File not found'}), 404
     
-    file_record = encrypted_files[file_id]
     if file_record['user_id'] != request.user_id:
         return jsonify({'error': 'Unauthorized'}), 403
     
@@ -509,18 +601,26 @@ def download_decrypted(decrypted_id):
 @require_auth
 def list_files():
     """List all encrypted files for the current user."""
-    user_files = [
-        f for f in encrypted_files.values()
-        if f['user_id'] == request.user_id
-    ]
+    db = get_db()
+    files = db.execute(
+        '''SELECT id, original_path, filename, file_size, algorithm, created_at 
+           FROM encrypted_files WHERE user_id = ? ORDER BY created_at DESC''',
+        (request.user_id,)
+    ).fetchall()
     
-    # Sort by created_at descending
-    user_files.sort(key=lambda x: x['created_at'], reverse=True)
+    file_list = [{
+        'id': f['id'],
+        'original_path': f['original_path'],
+        'filename': f['filename'],
+        'file_size': f['file_size'],
+        'algorithm': f['algorithm'],
+        'created_at': f['created_at']
+    } for f in files]
     
     return jsonify({
         'success': True,
-        'files': user_files,
-        'count': len(user_files)
+        'files': file_list,
+        'count': len(file_list)
     })
 
 
@@ -528,10 +628,14 @@ def list_files():
 @require_auth
 def delete_file(file_id):
     """Delete an encrypted file."""
-    if file_id not in encrypted_files:
+    db = get_db()
+    file_record = db.execute(
+        'SELECT * FROM encrypted_files WHERE id = ?', (file_id,)
+    ).fetchone()
+    
+    if not file_record:
         return jsonify({'error': 'File not found'}), 404
     
-    file_record = encrypted_files[file_id]
     if file_record['user_id'] != request.user_id:
         return jsonify({'error': 'Unauthorized'}), 403
     
@@ -541,8 +645,9 @@ def delete_file(file_id):
     except:
         pass
     
-    # Remove record
-    del encrypted_files[file_id]
+    # Remove database record
+    db.execute('DELETE FROM encrypted_files WHERE id = ?', (file_id,))
+    db.commit()
     
     return jsonify({'success': True})
 
@@ -551,18 +656,23 @@ def delete_file(file_id):
 @require_auth
 def get_stats():
     """Get dashboard statistics."""
-    user_files = [f for f in encrypted_files.values() if f['user_id'] == request.user_id]
-    total_size = sum(f['file_size'] for f in user_files)
+    db = get_db()
+    files = db.execute(
+        'SELECT file_size, algorithm FROM encrypted_files WHERE user_id = ?',
+        (request.user_id,)
+    ).fetchall()
+    
+    total_size = sum(f['file_size'] for f in files)
+    algo_counts = {}
+    for f in files:
+        algo = f['algorithm']
+        algo_counts[algo] = algo_counts.get(algo, 0) + 1
     
     return jsonify({
         'success': True,
-        'file_count': len(user_files),
+        'file_count': len(files),
         'total_size': total_size,
-        'algorithms': {
-            'AES-256-GCM': sum(1 for f in user_files if f['algorithm'] == 'AES-256-GCM'),
-            'ChaCha20-Poly1305': sum(1 for f in user_files if f['algorithm'] == 'ChaCha20-Poly1305'),
-            'Hybrid': sum(1 for f in user_files if f['algorithm'] == 'Hybrid'),
-        }
+        'algorithms': algo_counts
     })
 
 
@@ -581,6 +691,7 @@ def system_status():
             'encryption_engine': {'status': 'KYBER-1024 READY', 'ok': True},
             'secure_memory': {'status': 'PROTECTED', 'ok': True},
             'network_isolation': {'status': 'LOCAL ONLY', 'ok': True},
+            'database': {'status': 'SQLITE CONNECTED', 'ok': True},
         },
         'timestamp': datetime.now(timezone.utc).isoformat()
     })
