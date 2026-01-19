@@ -41,6 +41,17 @@ app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 app.config['UPLOAD_FOLDER'] = os.environ.get('UPLOAD_FOLDER', '/tmp/securevault_uploads')
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
+# Handle OPTIONS preflight requests explicitly
+@app.before_request
+def handle_preflight():
+    if request.method == "OPTIONS":
+        response = app.make_default_options_response()
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept')
+        response.headers.add('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+        response.headers.add('Access-Control-Max-Age', '3600')
+        return response
+
 # Add CORS headers to all responses
 @app.after_request
 def after_request(response):
@@ -48,6 +59,7 @@ def after_request(response):
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept')
     response.headers.add('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
     return response
+
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
