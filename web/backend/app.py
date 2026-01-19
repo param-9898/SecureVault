@@ -189,13 +189,22 @@ def db_fetchall(query, params=None):
 
 # Initialize database on first request
 _db_initialized = False
+_db_error = None
 
 @app.before_request
 def before_request():
-    global _db_initialized
+    global _db_initialized, _db_error
+    # Skip DB init for health check
+    if request.path == '/api/health':
+        return
     if not _db_initialized:
-        init_db()
-        _db_initialized = True
+        try:
+            init_db()
+            _db_initialized = True
+            _db_error = None
+        except Exception as e:
+            _db_error = str(e)
+            print(f"Database initialization error: {e}")
 
 
 # ============================================================
@@ -377,12 +386,17 @@ def decrypt_hybrid(ciphertext: bytes, metadata: bytes, key: bytes) -> bytes:
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """Health check endpoint."""
+    """Health check endpoint - always returns OK for Render."""
     db_type = 'postgresql' if USE_POSTGRES else 'sqlite'
+    db_status = 'connected' if _db_initialized else 'initializing'
+    if _db_error:
+        db_status = f'error: {_db_error[:50]}'
+    
     return jsonify({
         'status': 'healthy',
         'version': '1.0.0',
         'database': db_type,
+        'db_status': db_status,
         'timestamp': datetime.now(timezone.utc).isoformat()
     })
 
