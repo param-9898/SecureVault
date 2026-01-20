@@ -4,5 +4,5 @@
  * API URL for the deployed backend on Render
  */
 
-// Production backend URL (Render.com with Supabase PostgreSQL)
+// USE THE CORRECT BACKEND URL HERE
 window.API_BASE_URL = 'https://securevault-abiu.onrender.com/api';
