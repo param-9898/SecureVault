@@ -5,9 +5,10 @@
 
 class SecureVaultAPI {
     constructor() {
-        // Default to localhost, can be overridden
-        this.baseUrl = window.API_BASE_URL || 'http://localhost:5000/api';
+        // HARDCODED CORRECT BACKEND URL
+        this.baseUrl = 'https://securevault-abiu.onrender.com/api';
         this.token = localStorage.getItem('svx_token');
+        console.log("API Initialized with: " + this.baseUrl);
     }
 
     /**
@@ -159,7 +160,7 @@ class SecureVaultAPI {
 
     async downloadDecrypted(decryptedId, filename) {
         const url = `${this.baseUrl}/download/${decryptedId}?filename=${encodeURIComponent(filename)}`;
-        
+
         const response = await fetch(url, {
             headers: {
                 'Authorization': `Bearer ${this.token}`
@@ -171,7 +172,7 @@ class SecureVaultAPI {
         }
 
         const blob = await response.blob();
-        
+
         // Trigger download
         const downloadUrl = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
